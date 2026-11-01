@@ -99,12 +99,12 @@ def check_default_credentials(url, credentials, verbose=False):
 
         for username, password in credentials.items():
             if verbose:
-                logging.info(f"Attempting to login with username: {username}, password: {password}")
+                logging.info(f"Attempting to login with username: {username}, password: ********")
 
             # This is a SIMPLIFIED EXAMPLE.  Real-world login mechanisms
             # are often more complex (CSRF tokens, etc.).
             try:
-                response = requests.post(login_url, data={"username": username, "password": password}, allow_redirects=False)
+                response = requests.post(login_url, data={"username": username, "password": password}, timeout=10, allow_redirects=False)
                 response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
 
                 # Check for successful login (e.g., redirection or specific content)
@@ -112,10 +112,10 @@ def check_default_credentials(url, credentials, verbose=False):
                     vulnerabilities.append({
                         "url": login_url,
                         "username": username,
-                        "password": password,
-                        "description": f"Default credentials detected: username='{username}', password='{password}'"
+                        "password": "********",
+                        "description": f"Default credentials detected: username='{username}', password='********'"
                     })
-                    logging.warning(f"Default credentials found at {login_url}: username='{username}', password='{password}'")
+                    logging.warning(f"Default credentials found at {login_url}: username='{username}', password='********'")
                     break  # Stop after the first successful login
                 else:
                    if verbose:
@@ -196,7 +196,7 @@ def main():
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)  # Set log level to DEBUG if verbose is enabled
         logging.debug(f"Target URL: {args.url}")
-        logging.debug(f"Credentials being used: {credentials}")
+        logging.debug(f"Credentials being used: {len(credentials)} pairs for usernames: {sorted(credentials.keys())}")
 
     # Perform vulnerability scan
     vulnerabilities = check_default_credentials(args.url, credentials, args.verbose)

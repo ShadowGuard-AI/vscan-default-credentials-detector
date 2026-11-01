@@ -1,5 +1,5 @@
 # vscan-default-credentials-detector
-Identifies the presence of default credentials in configuration files, source code, or API endpoints.  Includes a database of known default usernames and passwords and checks for their usage. - Focused on Lightweight web application vulnerability scanning focused on identifying common misconfigurations and publicly known vulnerabilities
+Tries a set of known default username and password pairs, plus any operator supplied pairs from a JSON file, against the login form of the target supplied by the operator, and reports which username matched. Passwords are never written in clear: a successful record reports the username and a fixed masked marker in place of the password, in the console output, in verbose logs, and in the saved JSON file. - Focused on Lightweight web application vulnerability scanning focused on identifying common misconfigurations and publicly known vulnerabilities
 
 ## Install
 `git clone https://github.com/ShadowStrikeHQ/vscan-default-credentials-detector`
