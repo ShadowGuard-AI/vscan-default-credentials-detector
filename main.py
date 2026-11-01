@@ -105,9 +105,11 @@ def check_default_credentials(url, credentials, verbose=False):
             # are often more complex (CSRF tokens, etc.).
             try:
                 response = requests.post(login_url, data={"username": username, "password": password}, timeout=10, allow_redirects=False)
+                # A 401 or 403 answer raises and is caught below as a request error, so a server that answers failed logins with a status code produces an error line per pair instead of a failed attempt line. Reading the log, that looks like the target was broken rather than defended.
                 response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
 
                 # Check for successful login (e.g., redirection or specific content)
+                # Success is a redirect or the word Welcome anywhere in the body. Plenty of failed login pages say welcome on them, and plenty of real applications land somewhere else with no such word, so a hit here is a lead to check by hand and a miss proves very little.
                 if response.status_code == 302 or "Welcome" in response.text:  # Customize this check
                     vulnerabilities.append({
                         "url": login_url,
@@ -116,6 +118,7 @@ def check_default_credentials(url, credentials, verbose=False):
                         "description": f"Default credentials detected: username='{username}', password='********'"
                     })
                     logging.warning(f"Default credentials found at {login_url}: username='{username}', password='********'")
+                    # Stopping at the first working pair is a kindness to the target and a limit on the report. Other default pairs that would also have worked are never tried, so the output is one finding, not a count of how many defaults were live.
                     break  # Stop after the first successful login
                 else:
                    if verbose:
@@ -144,6 +147,7 @@ def urljoin(base, path):
     Returns:
         str: The joined URL.
     """
+    # This local joiner is not the urllib one, and the difference matters: it keeps the base path and appends. Point it at a URL that already ends in a page name and the login address is built under that page, which is either exactly right or completely wrong depending on the application.
     if base.endswith('/'):
         if path.startswith('/'):
             return base[:-1] + path
@@ -187,10 +191,12 @@ def main():
     if args.data:
         custom_credentials = load_custom_credentials(args.data)
         if custom_credentials is None:
+            # Both refusal paths in main return normally, so the process exits 0. A bad credentials file and an invalid URL therefore look like a completed clean scan to anything watching the exit code, and only the log says otherwise.
             return  # Exit if loading custom credentials failed
 
     # Merge default and custom credentials
     credentials = DEFAULT_CREDENTIALS.copy()
+    # A custom entry with a default user name replaces the default password instead of adding a second pair to try. A caller who adds admin with their own guess silently stops the built in admin password from being tried at all.
     credentials.update(custom_credentials)
 
     if args.verbose:
