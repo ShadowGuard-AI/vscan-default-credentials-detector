@@ -1,11 +1,11 @@
 import argparse
 import logging
 import requests
-from bs4 import BeautifulSoup
 import os
 import json
 import re
-from urllib.parse import urlparse
+import sys
+from urllib.parse import urlparse, urljoin as _stdlib_urljoin
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -97,7 +97,8 @@ def check_default_credentials(url, credentials, verbose=False):
         # Example:  Assume the app has a login form at /login
         login_url = urljoin(url, "/login")
 
-        for username, password in credentials.items():
+        pairs = credentials.items() if isinstance(credentials, dict) else list(credentials)
+        for username, password in pairs:
             if verbose:
                 logging.info(f"Attempting to login with username: {username}, password: ********")
 
@@ -105,12 +106,15 @@ def check_default_credentials(url, credentials, verbose=False):
             # are often more complex (CSRF tokens, etc.).
             try:
                 response = requests.post(login_url, data={"username": username, "password": password}, timeout=10, allow_redirects=False)
-                # A 401 or 403 answer raises and is caught below as a request error, so a server that answers failed logins with a status code produces an error line per pair instead of a failed attempt line. Reading the log, that looks like the target was broken rather than defended.
-                response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+                if response.status_code in (401, 403):
+                    if verbose:
+                        logging.info(f"Login attempt failed with username: {username} (HTTP {response.status_code})")
+                    continue
 
                 # Check for successful login (e.g., redirection or specific content)
                 # Success is a redirect or the word Welcome anywhere in the body. Plenty of failed login pages say welcome on them, and plenty of real applications land somewhere else with no such word, so a hit here is a lead to check by hand and a miss proves very little.
-                if response.status_code == 302 or "Welcome" in response.text:  # Customize this check
+                has_login_form = 'type="password"' in response.text or "type='password'" in response.text
+                if response.status_code in (301, 302, 303, 307, 308) or ("Welcome" in response.text and not has_login_form):
                     vulnerabilities.append({
                         "url": login_url,
                         "username": username,
@@ -118,8 +122,8 @@ def check_default_credentials(url, credentials, verbose=False):
                         "description": f"Default credentials detected: username='{username}', password='********'"
                     })
                     logging.warning(f"Default credentials found at {login_url}: username='{username}', password='********'")
-                    # Stopping at the first working pair is a kindness to the target and a limit on the report. Other default pairs that would also have worked are never tried, so the output is one finding, not a count of how many defaults were live.
-                    break  # Stop after the first successful login
+                    # Continue trying the remaining pairs so the report
+                    # lists every default pair that works, not just the first.
                 else:
                    if verbose:
                        logging.info(f"Login attempt failed with username: {username}")
@@ -136,28 +140,8 @@ def check_default_credentials(url, credentials, verbose=False):
 
 
 def urljoin(base, path):
-    """
-    Joins a base URL with a path, handling cases where the base URL
-    already ends with a slash or the path starts with a slash.
-
-    Args:
-        base (str): The base URL.
-        path (str): The path to join.
-
-    Returns:
-        str: The joined URL.
-    """
-    # This local joiner is not the urllib one, and the difference matters: it keeps the base path and appends. Point it at a URL that already ends in a page name and the login address is built under that page, which is either exactly right or completely wrong depending on the application.
-    if base.endswith('/'):
-        if path.startswith('/'):
-            return base[:-1] + path
-        else:
-            return base + path
-    else:
-        if path.startswith('/'):
-            return base + path
-        else:
-            return base + '/' + path
+    """Join a base URL with a path using standard URL resolution."""
+    return _stdlib_urljoin(base, path)
 
 
 def save_results(results, output_file):
@@ -184,25 +168,25 @@ def main():
 
     if not is_valid_url(args.url):
         logging.error("Invalid URL provided.")
-        return
+        sys.exit(1)
 
     # Load custom credentials, if provided
     custom_credentials = {}
     if args.data:
         custom_credentials = load_custom_credentials(args.data)
         if custom_credentials is None:
-            # Both refusal paths in main return normally, so the process exits 0. A bad credentials file and an invalid URL therefore look like a completed clean scan to anything watching the exit code, and only the log says otherwise.
-            return  # Exit if loading custom credentials failed
+            sys.exit(1)
 
     # Merge default and custom credentials
-    credentials = DEFAULT_CREDENTIALS.copy()
-    # A custom entry with a default user name replaces the default password instead of adding a second pair to try. A caller who adds admin with their own guess silently stops the built in admin password from being tried at all.
-    credentials.update(custom_credentials)
+    # Keep default and custom pairs as a list so a custom entry for a
+    # username that also has a default pair does not replace that pair;
+    # both passwords are tried.
+    credentials = list(DEFAULT_CREDENTIALS.items()) + list(custom_credentials.items())
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)  # Set log level to DEBUG if verbose is enabled
         logging.debug(f"Target URL: {args.url}")
-        logging.debug(f"Credentials being used: {len(credentials)} pairs for usernames: {sorted(credentials.keys())}")
+        logging.debug(f"Credentials being used: {len(credentials)} pairs for usernames: {sorted({u for u, _ in credentials})}")
 
     # Perform vulnerability scan
     vulnerabilities = check_default_credentials(args.url, credentials, args.verbose)
